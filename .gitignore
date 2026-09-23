@@ -1,0 +1,50 @@
+# Environments
+venv/
+env/
+.venv/
+.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated test audio
+voice_service/test_samples/
+
+# Persisted vector store
+chroma_db/
+
+# Structured scheme/partner database (huge to diff, fully reproducible via
+# scripts/seed_schemes.py + scripts/ingest_partners.py)
+vittsetu.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Frontend (node_modules alone is typically 50-100+ MB)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local model/HF caches, if ever redirected into the repo (normally ~/.cache/huggingface)
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.onnx
+
+# Root-level RAG data corpus only (anchored with a leading slash — an
+# unanchored "data" pattern here previously also matched, and incorrectly
+# ignored, unrelated nested dirs like frontend/src/data/)
+/data/
+/.data/
+
+*.env
+venv/
