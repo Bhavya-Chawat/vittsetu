@@ -1,19 +1,22 @@
 import os
 from pathlib import Path
-import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile
+
+# Load .env before importing any project module that reads settings.
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from rag_core import build_vector_store, force_rebuild_index
 from agent import agent
 from db import init_db
-from routers import schemes, calculate, partners, admin, interpret
-
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+from llm_client import LLMUnavailableError
+from routers import schemes, calculate, partners, admin, interpret, applications
 
 VOICE_SERVICE_URL = os.environ.get("VOICE_SERVICE_URL", "http://localhost:8001")
 
@@ -27,6 +30,13 @@ app.include_router(calculate.router)
 app.include_router(partners.router)
 app.include_router(admin.router)
 app.include_router(interpret.router)
+app.include_router(applications.router)
+
+
+@app.exception_handler(LLMUnavailableError)
+def llm_unavailable_handler(request: Request, exc: LLMUnavailableError):
+    """LLM-backed endpoints (/ask, /api/interpret) fail cleanly without GROQ_API_KEY."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 # Build index once at startup
 init_db()

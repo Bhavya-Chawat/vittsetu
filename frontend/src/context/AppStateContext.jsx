@@ -11,6 +11,7 @@ const initialState = {
   calculation: null, // CalculateResponse
   location: null, // { lat, lon }
   selectedPartner: null, // PartnerOut
+  routedApplication: null, // ApplicationPublic, once routed to selectedPartner
 };
 
 export function AppStateProvider({ children }) {

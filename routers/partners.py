@@ -4,20 +4,19 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from db import get_db
-from schemas import PartnersNearbyRequest, PartnerOut
-from partner_engine import find_nearby_partners
+from schemas import PartnersNearbyRequest, PartnersNearbyResponse
+from partner_engine import find_nearby_partners, partner_out
 
 router = APIRouter(prefix="/api", tags=["partners"])
 
 
-@router.post("/partners/nearby", response_model=list[PartnerOut])
+@router.post("/partners/nearby", response_model=PartnersNearbyResponse)
 def partners_nearby(req: PartnersNearbyRequest, db: Session = Depends(get_db)):
-    results = find_nearby_partners(
+    result = find_nearby_partners(
         db, req.lat, req.lon, req.state, req.district, req.scheme_code, req.limit
     )
-    out = []
-    for partner, distance in results:
-        item = PartnerOut.model_validate(partner)
-        item.distance_km = round(distance, 1) if distance is not None else None
-        out.append(item)
-    return out
+    return PartnersNearbyResponse(
+        partners=[partner_out(m.partner, m.routing, m.distance_km) for m in result.partners],
+        excluded=[partner_out(m.partner, m.routing, m.distance_km) for m in result.excluded],
+        note=result.note,
+    )

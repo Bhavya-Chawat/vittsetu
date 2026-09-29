@@ -25,9 +25,35 @@ export default function Requirement() {
   const [courseName, setCourseName] = useState(appState.education?.course_name ?? '');
   const [courseFee, setCourseFee] = useState(appState.education?.course_fee ?? '');
   const [repaymentStarted, setRepaymentStarted] = useState(appState.education?.repayment_started ?? false);
+  const [courseDuration, setCourseDuration] = useState(appState.education?.course_duration_months ?? '');
+
+  // Activity: suggested deterministically from the description, confirmed by the user.
+  const [categories, setCategories] = useState([]);
+  const [activity, setActivity] = useState(appState.business?.activity_category ?? '');
+  const [activityTouched, setActivityTouched] = useState(Boolean(appState.business?.activity_category));
+  const [suggestion, setSuggestion] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (purpose !== 'business') return;
+    api.listActivities().then(setCategories).catch(() => setCategories([]));
+  }, [purpose]);
+
+  useEffect(() => {
+    if (purpose !== 'business' || !projectType.trim()) return undefined;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.classifyActivity(projectType);
+        setSuggestion(res.category ? res : null);
+        if (!activityTouched) setActivity(res.category ?? '');
+      } catch {
+        setSuggestion(null);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [projectType, purpose, activityTouched]);
 
   async function handleInterpret() {
     if (!freeText.trim()) return;
@@ -38,6 +64,10 @@ export default function Requirement() {
       if (purpose === 'business') {
         if (res.project_type) setProjectType(res.project_type);
         if (res.estimated_cost) setProjectCost(res.estimated_cost);
+        if (res.activity_category) {
+          setActivity(res.activity_category);
+          setActivityTouched(false); // still a suggestion until the user confirms
+        }
       } else {
         if (res.course_name) setCourseName(res.course_name);
         if (res.course_fee) setCourseFee(res.course_fee);
@@ -55,18 +85,31 @@ export default function Requirement() {
     setError(null);
     setLoading(true);
     try {
-      let payload = { profile: appState.profile };
+      const payload = {
+        profile: appState.profile,
+        lat: appState.location?.lat ?? null,
+        lon: appState.location?.lon ?? null,
+      };
       if (purpose === 'business') {
-        const business = { project_type: projectType, estimated_cost: Number(projectCost) };
+        const business = {
+          project_type: projectType,
+          estimated_cost: Number(projectCost),
+          activity_category: activity || null,
+        };
         payload.business = business;
         update({ business });
       } else {
-        const education = { course_name: courseName, course_fee: Number(courseFee), repayment_started: repaymentStarted };
+        const education = {
+          course_name: courseName,
+          course_fee: Number(courseFee),
+          repayment_started: repaymentStarted,
+          course_duration_months: courseDuration ? Number(courseDuration) : null,
+        };
         payload.education = education;
         update({ education });
       }
       const result = await api.recommend(payload);
-      update({ recommendResult: result });
+      update({ recommendResult: result, calculation: null });
       navigate('/results');
     } catch (err) {
       setError(err.message);
@@ -76,6 +119,8 @@ export default function Requirement() {
   }
 
   const steps = [t('step_eligibility'), t('step_requirement'), t('step_results'), t('step_calculator'), t('step_partners'), t('step_checklist')];
+  const categoryLabel = (c) => (lang === 'hi' ? c.label_hi : c.label);
+  const shownSuggestion = projectType.trim() ? suggestion : null;
 
   return (
     <div>
@@ -84,8 +129,9 @@ export default function Requirement() {
         <h2>{t('step_requirement')}</h2>
 
         <div className="field">
-          <label>{t('or_describe')}</label>
+          <label htmlFor="free-text">{t('or_describe')}</label>
           <textarea
+            id="free-text"
             value={freeText}
             onChange={(e) => setFreeText(e.target.value)}
             placeholder={t('describe_placeholder')}
@@ -100,23 +146,47 @@ export default function Requirement() {
           {purpose === 'business' ? (
             <>
               <div className="field">
-                <label>{t('project_type_label')}</label>
-                <input type="text" required value={projectType} onChange={(e) => setProjectType(e.target.value)} />
+                <label htmlFor="project-type">{t('project_type_label')}</label>
+                <input id="project-type" type="text" required value={projectType} onChange={(e) => setProjectType(e.target.value)} />
               </div>
               <div className="field">
-                <label>{t('project_cost_label')}</label>
-                <input type="number" min="1" required value={projectCost} onChange={(e) => setProjectCost(e.target.value)} />
+                <label htmlFor="activity">{t('activity_label')}</label>
+                <select
+                  id="activity"
+                  required
+                  value={activity}
+                  onChange={(e) => {
+                    setActivity(e.target.value);
+                    setActivityTouched(true);
+                  }}
+                >
+                  <option value="">{t('activity_choose')}</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
+                  ))}
+                </select>
+                {shownSuggestion && (
+                  <div className="field-hint">
+                    {t('activity_suggested')}: <strong>{categoryLabel(categories.find((c) => c.id === shownSuggestion.category) ?? { label: shownSuggestion.label, label_hi: shownSuggestion.label })}</strong>
+                    {' '}({t('activity_matched')}: {shownSuggestion.matched_keywords.join(', ')})
+                  </div>
+                )}
+                <div className="field-hint">{t('activity_confirm_hint')}</div>
+              </div>
+              <div className="field">
+                <label htmlFor="project-cost">{t('project_cost_label')}</label>
+                <input id="project-cost" type="number" min="1" required value={projectCost} onChange={(e) => setProjectCost(e.target.value)} />
               </div>
             </>
           ) : (
             <>
               <div className="field">
-                <label>{t('course_name_label')}</label>
-                <input type="text" required value={courseName} onChange={(e) => setCourseName(e.target.value)} />
+                <label htmlFor="course-name">{t('course_name_label')}</label>
+                <input id="course-name" type="text" required value={courseName} onChange={(e) => setCourseName(e.target.value)} />
               </div>
               <div className="field">
-                <label>{t('course_fee_label')}</label>
-                <input type="number" min="1" required value={courseFee} onChange={(e) => setCourseFee(e.target.value)} />
+                <label htmlFor="course-fee">{t('course_fee_label')}</label>
+                <input id="course-fee" type="number" min="1" required value={courseFee} onChange={(e) => setCourseFee(e.target.value)} />
               </div>
               <div className="field checkbox-field">
                 <input
@@ -126,6 +196,19 @@ export default function Requirement() {
                   onChange={(e) => setRepaymentStarted(e.target.checked)}
                 />
                 <label htmlFor="repayment-started" style={{ marginBottom: 0 }}>{t('repayment_started_label')}</label>
+              </div>
+              <div className="field">
+                <label htmlFor="course-duration">{t('course_duration_label')}</label>
+                <input
+                  id="course-duration"
+                  type="number"
+                  min="1"
+                  max="120"
+                  required={!repaymentStarted}
+                  value={courseDuration}
+                  onChange={(e) => setCourseDuration(e.target.value)}
+                />
+                <div className="field-hint">{t('course_duration_hint')}</div>
               </div>
             </>
           )}

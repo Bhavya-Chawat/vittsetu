@@ -1,6 +1,5 @@
 """LangGraph agent with router → retrieve → grade → generate workflow."""
 
-import os
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -15,9 +14,9 @@ except Exception:
     pass
 
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 
+import llm_client
 from rag_tools import search_govt_schemes, detect_scheme
 from rag_core import build_vector_store, query_vector_store
 
@@ -25,8 +24,11 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 # ── LLM ──────────────────────────────────────────────────────────────────
-MODEL_NAME = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
-llm = ChatGroq(model=MODEL_NAME, temperature=0, max_tokens=4096)
+# Built lazily on first use (see llm_client) so importing this module — and
+# therefore starting api.py — never requires GROQ_API_KEY.
+def _llm():
+    return llm_client.get_llm(max_tokens=4096)
+
 
 MAX_RETRIES = 2
 
@@ -69,7 +71,7 @@ def router(state: AgentState) -> AgentState:
     if history and not rewritten_query:
         history_lines = [f"{m.get('sender', 'User')}: {m.get('text', '')}" for m in history[-4:]]
         history_str = "\n".join(history_lines)
-        response = llm.invoke(
+        response = _llm().invoke(
             f"""Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question, in its original language, that includes all relevant context (especially the names of any schemes being discussed). If the follow up question is already standalone, just return it.
 
 Chat History:
@@ -83,7 +85,7 @@ Standalone Question:"""
     else:
         contextualized_question = rewritten_query or question
 
-    response = llm.invoke(
+    response = _llm().invoke(
         f"""You are a classifier. Given the user question below, decide if it 
 is about Indian government financial schemes, loans, subsidies, or related 
 eligibility/application topics.
@@ -146,7 +148,7 @@ def grade(state: AgentState) -> AgentState:
             "Mark as 'relevant' if any of the retrieved chunks provide information on government schemes, loans, subsidies, or eligibility that could help answer the user's intent."
         )
 
-    response = llm.invoke(
+    response = _llm().invoke(
         f"""You are a relevance grader for an Indian government financial scheme assistant.
 Given the user question and the retrieved context below, decide if the context contains enough information to answer the question meaningfully.
 
@@ -169,7 +171,7 @@ Retrieved context:
 
     if relevance == "not_relevant" and retries < MAX_RETRIES:
         # Rewrite the query for a retry with domain expansion
-        rewrite_response = llm.invoke(
+        rewrite_response = _llm().invoke(
             f"""The user asked: "{question}"
 The initial vector search returned insufficient results. Rewrite this user question into an expanded search query targeting Indian government financial scheme documents.
 Include relevant domain terms, business category synonyms (e.g. street vendor, micro credit, working capital, small enterprise, collateral free loan, PM SVANidhi, PMEGP, Stand-Up India, Udyogini), and key loan terms if applicable.
@@ -206,7 +208,7 @@ def generate(state: AgentState) -> AgentState:
 
     if exhausted_retries:
         print(f"  [generate] max retries exhausted & still not_relevant — cautious answer")
-        response = llm.invoke(
+        response = _llm().invoke(
             f"""You are a helpful assistant for a government scheme navigator called Setu. 
 The user asked the question below, but after searching our database we could NOT find a clearly matching scheme.
 {lang_inst}
@@ -222,7 +224,7 @@ INSTRUCTION: Keep your response clear, structured, and helpful in Markdown. Use 
         )
     else:
         print(f"  [generate] producing grounded answer in lang={lang_code}")
-        response = llm.invoke(
+        response = _llm().invoke(
             f"""You are a helpful assistant for a government scheme navigator called Setu. 
 Answer using ONLY relevant information below — ignore any chunks that don't relate to the question. Be clear, empathetic, and conversational.
 {lang_inst}
@@ -247,7 +249,7 @@ def generate_direct(state: AgentState) -> AgentState:
     lang_code = state.get("language", "en")
     lang_inst = get_language_instruction(lang_code)
     print(f"  [generate_direct] responding without retrieval in lang={lang_code}")
-    response = llm.invoke(
+    response = _llm().invoke(
         f"""You are a helpful assistant for a government scheme navigator 
 called Setu. The user sent a message that is not about government schemes.
 {lang_inst}

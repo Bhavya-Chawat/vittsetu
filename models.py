@@ -44,6 +44,14 @@ class Scheme(Base):
 
     repayment_tenure_max_months = Column(Integer, nullable=False)
 
+    # Guideline rules as data, evaluated by financial_engine (format documented
+    # there; values transcribed in scripts/seed_schemes.py). NULL falls back to
+    # the flat fields above: moratorium_min_months, repayment_tenure_max_months,
+    # interest_rate_to_beneficiary_pct.
+    moratorium_rules = Column(JSON, nullable=True)
+    tenure_rules = Column(JSON, nullable=True)
+    rates_by_partner_type = Column(JSON, nullable=True)  # {"Small Finance Bank": 15, ...}
+
     eligible_activities = Column(JSON, default=list)
     education_criteria = Column(JSON, nullable=True)
     required_documents = Column(JSON, default=list)
@@ -78,6 +86,19 @@ class Partner(Base):
     capacity_status_updated_by = Column(String(100), nullable=True)
     capacity_status_updated_at = Column(DateTime, nullable=True)
 
+    # Portfolio-health metrics used by the routing policy (partner_engine.py).
+    # NSFDC does not publish these per partner, so they are ONLY ever
+    # admin-entered (or explicitly-labelled demo data from
+    # scripts/seed_demo_metrics.py, metrics_updated_by == "DEMO DATA").
+    # NULL means "no data" — never fill in a guess.
+    fund_utilization_pct = Column(Float, nullable=True)
+    npa_pct = Column(Float, nullable=True)
+    overdue_pct = Column(Float, nullable=True)
+    allocated_funds_inr = Column(Float, nullable=True)
+    disbursed_funds_inr = Column(Float, nullable=True)
+    metrics_as_of_date = Column(String(20), nullable=True)  # ISO date the figures describe
+    metrics_updated_by = Column(String(100), nullable=True)
+
     source_url = Column(String(500), nullable=True)
     source_captured_date = Column(String(20), nullable=True)
 
@@ -86,16 +107,24 @@ class Partner(Base):
 
 
 class Application(Base):
-    """Lightweight MVP tracking stub — not a real application-processing workflow.
+    """An applicant's request routed to a chosen Channel Partner.
 
-    Real submission happens on the official PM-SURAJ portal; this table only
-    records that a beneficiary was matched and routed, for demo/tracking purposes.
+    VittSetu doesn't process loans: the formal application is still made on
+    the official PM-SURAJ portal / with the partner. This records the routing
+    and lets the applicant track it by reference (see routers/applications.py
+    for the status lifecycle).
     """
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True)
+    reference = Column(String(20), unique=True, index=True, nullable=True)  # VS-2026-000123
+
+    # Optional PII — never returned by the public status endpoint.
     applicant_name = Column(String(200), nullable=True)
     applicant_contact = Column(String(100), nullable=True)
+    applicant_state = Column(String(100), nullable=True)
+    applicant_district = Column(String(100), nullable=True)
+    consent_given_at = Column(DateTime, nullable=True)
 
     scheme_id = Column(Integer, ForeignKey("schemes.id"), nullable=True)
     partner_id = Column(Integer, ForeignKey("partners.id"), nullable=True)
@@ -103,10 +132,33 @@ class Application(Base):
     project_cost = Column(Float, nullable=True)
     requested_loan_amount = Column(Float, nullable=True)
 
-    status = Column(String(30), default="draft")  # draft | matched | routed | handed_off_to_pmsuraj
+    # Routing decision at submission time, kept for audit even if the
+    # partner's metrics change later.
+    routing_status_at_submission = Column(String(20), nullable=True)
+    routing_reason_at_submission = Column(Text, nullable=True)
+
+    # routed | acknowledged_by_partner | handed_off_to_pmsuraj | sanctioned | disbursed | rejected
+    status = Column(String(30), default="routed")
 
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     scheme = relationship("Scheme")
     partner = relationship("Partner")
+    events = relationship("ApplicationEvent", back_populates="application", order_by="ApplicationEvent.id")
+
+
+class ApplicationEvent(Base):
+    """Append-only audit trail of an application's lifecycle."""
+    __tablename__ = "application_events"
+
+    id = Column(Integer, primary_key=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False, index=True)
+    event_type = Column(String(30), nullable=False)  # created | status_changed
+    from_status = Column(String(30), nullable=True)
+    to_status = Column(String(30), nullable=True)
+    note = Column(Text, nullable=True)  # admin-only; may contain operational detail
+    actor = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+    application = relationship("Application", back_populates="events")

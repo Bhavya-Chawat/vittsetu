@@ -19,6 +19,9 @@ export default function Layout({ children }) {
           <Link className={location.pathname === '/ask' ? 'active' : ''} to="/ask">
             {t('nav_ask')}
           </Link>
+          <Link className={location.pathname === '/track' ? 'active' : ''} to="/track">
+            {t('nav_track')}
+          </Link>
           <Link className={location.pathname === '/admin' ? 'active' : ''} to="/admin">
             {t('nav_admin')}
           </Link>

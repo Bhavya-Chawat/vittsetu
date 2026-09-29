@@ -51,20 +51,20 @@ if not exist ".env" (
     if exist ".env.example" (
         copy ".env.example" ".env" >nul
         echo [WARNING] .env created from .env.example.
-        echo           You MUST add your GROQ_API_KEY before VittSetu will work.
+        echo           Add your GROQ_API_KEY to enable Ask VittSetu and AI form-filling.
         echo           Get a free key at https://console.groq.com/keys
         echo           Opening it in Notepad now - save and close when done.
         notepad ".env"
     ) else (
-        echo [WARNING] No .env or .env.example found! GROQ_API_KEY must be set some other way.
+        echo [WARNING] No .env or .env.example found. Set GROQ_API_KEY some other way to enable AI features.
     )
 )
 
 :: ── 3. Scheme database ───────────────────────────────────────────────────
-if not exist "vittsetu.db" (
-    echo [INFO] Seeding scheme database from verified NSFDC data...
-    "%PYTHON_CMD%" scripts\seed_schemes.py
-)
+:: Runs every start: idempotent — adds missing schemes and fills fields an
+:: older database lacks (e.g. newly added guideline rules), never overwrites.
+echo [INFO] Checking scheme database against verified NSFDC data...
+"%PYTHON_CMD%" scripts\seed_schemes.py
 
 :: ── 4. Channel Partner data (first run only) ────────────────────────────
 "%PYTHON_CMD%" -c "import sys; from db import SessionLocal; from models import Partner; db = SessionLocal(); n = db.query(Partner).count(); db.close(); sys.exit(0 if n > 0 else 1)"

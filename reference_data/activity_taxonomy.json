@@ -1,0 +1,100 @@
+{
+  "_comment": "Deterministic activity taxonomy for the scheme recommender (see activity_taxonomy.py). A description is matched against each category's keywords (Latin keywords on word boundaries, allowing a plural s/es; Devanagari keywords as substrings). Each matched keyword scores its word count; the highest total wins, and ties go to the category listed first in tie_break_order (most specific first). Edit freely: this file is data, not code.",
+  "version": 1,
+  "tie_break_order": [
+    "plantation",
+    "construction",
+    "transport",
+    "agriculture_allied",
+    "manufacturing",
+    "services",
+    "trade_retail"
+  ],
+  "categories": [
+    {
+      "id": "agriculture_allied",
+      "label": "Agriculture & allied activities",
+      "label_hi": "कृषि एवं संबद्ध गतिविधियां",
+      "keywords": [
+        "agriculture", "agricultural", "farming", "farm", "crop", "cultivation", "vegetable cultivation",
+        "dairy", "dairy farm", "milch", "cattle", "cow", "buffalo", "goat", "goat rearing", "sheep",
+        "animal husbandry", "poultry", "poultry farm", "broiler", "layer farm", "fishery", "fisheries",
+        "fish farming", "aquaculture", "piggery", "pig rearing", "beekeeping", "apiculture", "sericulture",
+        "mushroom", "floriculture", "horticulture", "tractor", "power tiller", "irrigation", "pump set",
+        "खेती", "कृषि", "डेयरी", "पशुपालन", "गाय", "भैंस", "बकरी", "मुर्गी", "मुर्गीपालन", "मछली", "मत्स्य"
+      ]
+    },
+    {
+      "id": "plantation",
+      "label": "Plantation",
+      "label_hi": "बागान",
+      "keywords": [
+        "plantation", "tea garden", "tea estate", "tea plantation", "coffee", "coffee plantation",
+        "rubber", "rubber plantation", "coconut", "coconut grove", "arecanut", "areca", "cashew",
+        "orchard", "mango orchard", "cardamom", "pepper plantation", "oil palm",
+        "बागान", "चाय बागान", "नारियल", "रबर"
+      ]
+    },
+    {
+      "id": "construction",
+      "label": "Construction",
+      "label_hi": "निर्माण",
+      "keywords": [
+        "construction", "construction contractor", "civil contractor", "civil work", "building construction",
+        "house construction", "builder", "mason", "masonry", "shuttering", "scaffolding",
+        "निर्माण", "निर्माण कार्य", "भवन निर्माण", "ठेकेदार"
+      ]
+    },
+    {
+      "id": "manufacturing",
+      "label": "Manufacturing & processing",
+      "label_hi": "विनिर्माण एवं प्रसंस्करण",
+      "keywords": [
+        "manufacturing", "manufacture", "manufacturer", "factory", "fabrication", "production unit",
+        "processing unit", "food processing", "flour mill", "atta chakki", "oil mill", "rice mill",
+        "dal mill", "bakery", "pickle", "papad", "candle", "soap", "detergent", "agarbatti", "incense",
+        "furniture", "carpentry", "handloom", "powerloom", "weaving", "pottery", "leather", "footwear",
+        "shoe making", "garment manufacturing", "readymade garments", "printing press", "brick kiln",
+        "welding", "steel fabrication", "handicraft", "bamboo", "spice grinding",
+        "कारखाना", "उत्पादन", "हथकरघा", "बुनाई", "आटा चक्की", "फर्नीचर", "चमड़ा"
+      ]
+    },
+    {
+      "id": "trade_retail",
+      "label": "Trade & retail",
+      "label_hi": "व्यापार एवं खुदरा",
+      "keywords": [
+        "shop", "store", "kirana", "grocery", "general store", "retail", "trading", "trader", "wholesale",
+        "vendor", "street vendor", "hawker", "stall", "tea stall", "fruit stall", "vegetable vendor",
+        "medical store", "pharmacy", "mobile shop", "stationery", "cloth shop", "garment shop",
+        "hardware shop", "fancy store", "footwear shop", "cosmetics",
+        "दुकान", "किराना", "व्यापार", "ठेला", "खुदरा", "थोक"
+      ]
+    },
+    {
+      "id": "services",
+      "label": "Services",
+      "label_hi": "सेवाएं",
+      "keywords": [
+        "service", "services", "tailoring", "tailor", "boutique", "beauty parlour", "beauty parlor", "salon",
+        "barber", "repair", "mobile repair", "electronics repair", "cycle repair", "motor repair",
+        "computer centre", "computer center", "cyber cafe", "photocopy", "xerox", "laundry",
+        "dry cleaning", "catering", "tent house", "dhaba", "restaurant", "canteen", "tiffin", "tuition",
+        "coaching", "clinic", "diagnostic", "photography", "studio", "courier", "electrician", "plumber",
+        "gym", "event management", "digital services", "csc",
+        "सिलाई", "दर्जी", "मरम्मत", "ब्यूटी पार्लर", "सैलून", "ढाबा", "कोचिंग", "सेवा"
+      ]
+    },
+    {
+      "id": "transport",
+      "label": "Transport",
+      "label_hi": "परिवहन",
+      "keywords": [
+        "transport", "transportation", "taxi", "cab", "auto rickshaw", "autorickshaw", "e-rickshaw",
+        "erickshaw", "e rickshaw", "rickshaw", "truck", "tempo", "goods carrier", "pickup van",
+        "delivery van", "mini bus", "bus", "jeep", "logistics",
+        "परिवहन", "टैक्सी", "ऑटो रिक्शा", "ई-रिक्शा", "रिक्शा", "ट्रक", "टेम्पो"
+      ]
+    }
+  ]
+}

@@ -10,8 +10,17 @@ none of it is invented or estimated. Sources:
 
 If NSFDC revises rates/limits, update SOURCE_CAPTURED_DATE and the affected
 fields here (or via the admin console once built) — never edit silently.
+
+Guideline rules (moratorium, tenure, per-partner-type rates) are stored as
+data in moratorium_rules / tenure_rules / rates_by_partner_type and
+evaluated by financial_engine.py — see its docstring for the format.
+
+Usage:
+  python scripts/seed_schemes.py            # add missing schemes; fill empty fields on existing ones
+  python scripts/seed_schemes.py --refresh  # also overwrite the guideline-rule fields below from this file
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -78,9 +87,19 @@ SCHEMES = [
         moratorium_max_months=3,
         moratorium_notes=None,
         repayment_tenure_max_months=36,
+        moratorium_rules={
+            "default_months": 3,
+            "default_basis": "3-month moratorium, within the 3-year repayment period",
+        },
+        tenure_rules={
+            "includes_moratorium": True,
+            "default_months": 36,
+            "default_basis": "repaid in quarterly instalments within 3 years of disbursement, including the moratorium",
+        },
         eligible_activities=["Small/micro business activities"],
         education_criteria=None,
-        eligible_partner_types=["SCA"],
+        # "SCAs/CAs" per the scheme page; Banks are CAs per how-to-apply-2 (see ingest_partners.py).
+        eligible_partner_types=["SCA", "PSB", "RRB"],
     ),
     dict(
         code="TERM_LOAN",
@@ -97,9 +116,23 @@ SCHEMES = [
         moratorium_max_months=12,
         moratorium_notes="6-month moratorium in general; 12 months for plantation and construction activities.",
         repayment_tenure_max_months=84,
+        moratorium_rules={
+            "default_months": 6,
+            "default_basis": "6-month moratorium in general",
+            "rules": [{
+                "if": {"activity_category": ["plantation", "construction"]},
+                "months": 12,
+                "basis": "12-month moratorium for plantation and construction activities",
+            }],
+        },
+        tenure_rules={
+            "includes_moratorium": True,
+            "default_months": 84,
+            "default_basis": "repaid in quarterly instalments within 7 years, including the moratorium",
+        },
         eligible_activities=["Larger business/project activities", "Plantation", "Construction"],
         education_criteria=None,
-        eligible_partner_types=["SCA"],
+        eligible_partner_types=["SCA", "PSB", "RRB"],
     ),
     dict(
         code="AMY",
@@ -116,6 +149,15 @@ SCHEMES = [
         moratorium_max_months=3,
         moratorium_notes=None,
         repayment_tenure_max_months=36,
+        moratorium_rules={
+            "default_months": 3,
+            "default_basis": "3-month moratorium, within the 3-year repayment period",
+        },
+        tenure_rules={
+            "includes_moratorium": True,
+            "default_months": 36,
+            "default_basis": "repaid in quarterly instalments within 3 years of each disbursement, including the moratorium",
+        },
         eligible_activities=["Small/micro business activities via NBFC-MFIs"],
         education_criteria=None,
         eligible_partner_types=["NBFC-MFI"],
@@ -135,6 +177,16 @@ SCHEMES = [
         moratorium_max_months=3,
         moratorium_notes="13% p.a. via Cooperative Banks/Societies; 15% p.a. via Small Finance Banks — actual rate depends on which partner processes your loan.",
         repayment_tenure_max_months=60,
+        moratorium_rules={
+            "default_months": 3,
+            "default_basis": "3-month moratorium, within the 5-year repayment period",
+        },
+        tenure_rules={
+            "includes_moratorium": True,
+            "default_months": 60,
+            "default_basis": "repaid in quarterly or half-yearly instalments within 5 years, including the moratorium",
+        },
+        rates_by_partner_type={"Cooperative Bank": 13, "Cooperative Society": 13, "Small Finance Bank": 15},
         eligible_activities=["Small/micro business activities via Cooperative Banks/Societies or Small Finance Banks"],
         education_criteria=None,
         eligible_partner_types=["Cooperative Bank", "Cooperative Society", "Small Finance Bank"],
@@ -157,21 +209,61 @@ SCHEMES = [
             "up to 6 months if loan disbursed and repayment already started."
         ),
         repayment_tenure_max_months=144,  # 12 years (not started) — widest case; 10 years if repayment started
+        moratorium_rules={
+            "rules": [
+                {
+                    "if": {"repayment_started": True},
+                    "months": 6,  # "up to 6 months" — the maximum is used
+                    "basis": "up to 6 months, where the loan is disbursed and repayment has started",
+                },
+                {
+                    "if": {"repayment_started": False},
+                    "course_duration_plus_months": 12,
+                    "basis": "course period plus 1 year, where repayment has not started",
+                },
+            ],
+        },
+        tenure_rules={
+            # The scheme page lists the repayment period and the moratorium as
+            # separate columns and (unlike the other schemes) doesn't say
+            # "including the moratorium", so it's read as the period after it.
+            "includes_moratorium": False,
+            "rules": [
+                {"if": {"repayment_started": True}, "months": 120,
+                 "basis": "up to 10 years, where the loan is disbursed and repayment has started"},
+                {"if": {"repayment_started": False}, "months": 144,
+                 "basis": "up to 12 years, where repayment has not started"},
+            ],
+        },
         eligible_activities=[],
         education_criteria={"courses": ELS_COURSES},
-        eligible_partner_types=["SCA"],
+        eligible_partner_types=["SCA", "PSB", "RRB"],
     ),
 ]
 
 
-def seed():
+# Fields --refresh overwrites on existing rows. Deliberately excludes the
+# figures admins can edit through the console (limits, rates, tenure caps).
+RULE_FIELDS = [
+    "moratorium_rules", "tenure_rules", "rates_by_partner_type",
+    "eligible_partner_types", "education_criteria", "moratorium_notes",
+]
+
+
+def seed(refresh: bool = False):
     init_db()
     db = SessionLocal()
     try:
         for data in SCHEMES:
             existing = db.query(Scheme).filter_by(code=data["code"]).first()
             if existing:
-                print(f"[skip] {data['code']} already seeded")
+                changed = []
+                for field, value in data.items():
+                    current = getattr(existing, field)
+                    if (current is None and value is not None) or (refresh and field in RULE_FIELDS and current != value):
+                        setattr(existing, field, value)
+                        changed.append(field)
+                print(f"[update] {data['code']}: {', '.join(changed)}" if changed else f"[skip] {data['code']} up to date")
                 continue
             scheme = Scheme(
                 required_documents=COMMON_REQUIRED_DOCUMENTS,
@@ -188,4 +280,7 @@ def seed():
 
 
 if __name__ == "__main__":
-    seed()
+    parser = argparse.ArgumentParser(description="Seed NSFDC schemes into vittsetu.db.")
+    parser.add_argument("--refresh", action="store_true",
+                        help=f"overwrite these fields on existing schemes from this file: {', '.join(RULE_FIELDS)}")
+    seed(parser.parse_args().refresh)
