@@ -4,7 +4,7 @@ Multilingual voice layer for Setu: speech-to-text (ASR) via **SraVaani-1.0** (II
 
 ## Status
 
-`main.py` runs a working, hardened FastAPI service with `/transcribe` and `/speak`, wired into `api.py` (as a proxy — see its `/transcribe` and `/speak` endpoints) and into the frontend (mic button in `setu-scheme-navigator.html`). Run this service alongside `api.py` for voice features to work; if it's down, `api.py`'s voice endpoints return a clean `503` and text-only Q&A keeps working.
+`main.py` runs a working, hardened FastAPI service with `/transcribe` and `/speak`, wired into `api.py` (as a proxy — see its `/transcribe` and `/speak` endpoints) and into the React frontend: the mic button on the **Ask VittSetu** page (`frontend/src/pages/AskVittSetu.jsx`) records audio and sends it to `/transcribe`. `/speak` is available through the proxy, but the frontend doesn't play answers aloud yet. Run this service alongside `api.py` for voice features to work; if it's down, `api.py`'s voice endpoints return a clean `503` and text-only Q&A keeps working.
 
 - `main.py` — the service (`/health`, `/transcribe`, `/speak`).
 - `test_transcribe.py` / `test_tts.py` — standalone one-off sanity scripts (predate `main.py`).
@@ -13,8 +13,10 @@ Multilingual voice layer for Setu: speech-to-text (ASR) via **SraVaani-1.0** (II
 ### Running it
 
 ```bash
-.venv/bin/uvicorn voice_service.main:app --port 8001
+uv run uvicorn voice_service.main:app --host 127.0.0.1 --port 8001
 ```
+
+Bind it to `127.0.0.1` as above (`run.bat` does): browsers never call it directly — only `api.py` does, server-side — so it shouldn't be reachable from the network.
 
 Run alongside `api.py` (`uvicorn api:app --reload`, port 8000). `api.py` looks for the voice service at `http://localhost:8001` by default — override with a `VOICE_SERVICE_URL` env var if it's running elsewhere.
 

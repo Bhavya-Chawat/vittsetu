@@ -1,9 +1,18 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
+import { useAppState } from '../context/AppStateContext';
 
 export default function Layout({ children }) {
   const { lang, setLang, t } = useLanguage();
+  const { hasProgress, reset } = useAppState();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  function startOver() {
+    if (!window.confirm(t('start_over_confirm'))) return;
+    reset();
+    navigate('/');
+  }
 
   return (
     <div className="app-shell">
@@ -26,6 +35,11 @@ export default function Layout({ children }) {
             {t('nav_admin')}
           </Link>
         </nav>
+        {hasProgress && (
+          <button type="button" className="btn btn-secondary btn-small" onClick={startOver}>
+            ↺ {t('start_over')}
+          </button>
+        )}
         <div className="lang-pill">
           <button className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>
             {t('lang_en')}

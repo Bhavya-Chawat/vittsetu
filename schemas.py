@@ -1,8 +1,9 @@
 """Pydantic request/response models for the scheme, calculator, and partner APIs."""
 
+import re
 from datetime import date, datetime
 from typing import Optional, Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ── Eligibility & Recommendation ────────────────────────────────────────────
@@ -373,3 +374,186 @@ class ApplicationStatusUpdate(BaseModel):
     status: ApplicationStatus
     note: Optional[str] = Field(default=None, max_length=1000)
     updated_by: str = Field(default="admin", min_length=1, max_length=100)
+
+
+# ── Admin console ───────────────────────────────────────────────────────────
+
+# Channel Partner types, as published in NSFDC's directories (see scripts/ingest_partners.py).
+PartnerType = Literal[
+    "SCA", "PSB", "RRB", "NBFC-MFI", "Cooperative Bank", "Cooperative Society", "Small Finance Bank", "Other/SIDBI",
+]
+
+# Rough bounding box of India incl. island territories — catches swapped or mistyped coordinates.
+INDIA_LAT = (6.0, 37.6)
+INDIA_LON = (68.0, 97.5)
+
+
+def _check_http_url(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return v
+    v = v.strip()
+    if not re.match(r"^https?://[^\s/$.?#][^\s]*$", v):
+        raise ValueError("must be an http(s) URL")
+    return v
+
+
+class PartnerFields(BaseModel):
+    """Editable partner fields, shared by create and update."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    partner_type: Optional[PartnerType] = None
+    state: Optional[str] = Field(default=None, max_length=100)
+    district: Optional[str] = Field(default=None, max_length=100)
+    address: Optional[str] = Field(default=None, max_length=1000)
+    lat: Optional[float] = Field(default=None, ge=INDIA_LAT[0], le=INDIA_LAT[1])
+    lon: Optional[float] = Field(default=None, ge=INDIA_LON[0], le=INDIA_LON[1])
+    phone: Optional[str] = Field(default=None, max_length=100)
+    email: Optional[str] = Field(default=None, max_length=200)
+    eligible_scheme_codes: Optional[list[str]] = None
+    source_url: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", "state", "district", "address", "phone", "email")
+    @classmethod
+    def strip_blank(cls, v: Optional[str]) -> Optional[str]:
+        v = v.strip() if v else v
+        return v or None
+
+    @field_validator("email")
+    @classmethod
+    def email_shape(cls, v: Optional[str]) -> Optional[str]:
+        if v and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", v):
+            raise ValueError("is not a valid email address")
+        return v
+
+    @field_validator("source_url")
+    @classmethod
+    def url_shape(cls, v: Optional[str]) -> Optional[str]:
+        return _check_http_url(v) if v else None
+
+
+class PartnerCreate(PartnerFields):
+    name: str = Field(..., min_length=1, max_length=300)
+    partner_type: PartnerType
+    eligible_scheme_codes: list[str] = []
+
+    @model_validator(mode="after")
+    def name_not_blank(self):
+        # strip_blank turns a whitespace-only name into None after the length check.
+        if not self.name:
+            raise ValueError("name is required")
+        return self
+
+
+class PartnerUpdate(PartnerFields):
+    """PATCH semantics: omitted fields are unchanged; explicit null clears a field."""
+
+
+class PartnerListResponse(BaseModel):
+    items: list[PartnerOut]
+    total: int  # after filters
+    page: int
+    page_size: int
+    missing_coordinates: int  # across all partners, for the filter badges
+    missing_district: int
+
+
+class GeocodeRequest(BaseModel):
+    address: str = Field(..., min_length=3, max_length=500)
+    state: Optional[str] = Field(default=None, max_length=100)
+
+
+class GeocodeResponse(BaseModel):
+    lat: float
+    lon: float
+    display_name: str
+    query: str
+
+
+class SchemeUpdate(BaseModel):
+    """Omitted fields are unchanged. source_url is mandatory: every edit must cite its source."""
+    source_url: str = Field(..., max_length=500)
+    income_limit_annual: Optional[float] = Field(default=None, gt=0)
+    min_project_cost: Optional[float] = Field(default=None, ge=0)
+    max_project_cost: Optional[float] = Field(default=None, gt=0)
+    max_financing_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    max_loan_amount: Optional[float] = Field(default=None, gt=0)
+    interest_rate_to_beneficiary_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    rates_by_partner_type: Optional[dict[str, float]] = None
+    moratorium_min_months: Optional[int] = Field(default=None, ge=0, le=120)
+    moratorium_max_months: Optional[int] = Field(default=None, ge=0, le=120)
+    repayment_tenure_max_months: Optional[int] = Field(default=None, ge=1, le=360)
+
+    @field_validator("source_url")
+    @classmethod
+    def url_shape(cls, v: str) -> str:
+        return _check_http_url(v)
+
+    @field_validator("rates_by_partner_type")
+    @classmethod
+    def rates_in_range(cls, v: Optional[dict[str, float]]) -> Optional[dict[str, float]]:
+        if v is not None and any(not 0 <= r <= 100 for r in v.values()):
+            raise ValueError("rates must be between 0 and 100")
+        return v
+
+
+class FieldChange(BaseModel):
+    field: str
+    before: object = None
+    after: object = None
+
+
+class SchemeEditResult(BaseModel):
+    scheme: SchemeOut
+    changes: list[FieldChange]
+    applied: bool  # False for a dry run or when nothing changed
+
+
+class AuditEntryOut(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: str
+    action: str
+    actor: str
+    before: Optional[dict]
+    after: Optional[dict]
+    changed_fields: list[str]
+    created_at: datetime
+
+
+class AuditListResponse(BaseModel):
+    items: list[AuditEntryOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminMetrics(BaseModel):
+    applications_total: int
+    applications_by_status: dict[str, int]
+    disbursed_count: int
+    median_days_routed_to_disbursed: Optional[float]  # None until something is disbursed
+    partners_total: int
+    partners_by_routing_status: dict[str, int]
+    partners_with_real_metrics: int
+    partners_with_demo_metrics: int
+    partners_missing_coordinates: int
+    partners_missing_district: int
+
+
+# ── Public coverage stats ───────────────────────────────────────────────────
+
+class SchemeCoverage(BaseModel):
+    code: str
+    name: str
+    partners: int  # partners listed for this scheme
+    routable_partners: int  # of those, currently able to take applications
+    states_with_routable_partner: int
+
+
+class StatsResponse(BaseModel):
+    schemes: int
+    partners: int
+    partners_mapped: int  # with coordinates
+    states_covered: int  # states/UTs with at least one partner
+    partners_by_type: dict[str, int]
+    per_scheme: list[SchemeCoverage]
+    metrics_coverage: dict[str, int]  # real / demo / none

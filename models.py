@@ -162,3 +162,17 @@ class ApplicationEvent(Base):
     created_at = Column(DateTime, default=_utcnow)
 
     application = relationship("Application", back_populates="events")
+
+
+class AdminAuditLog(Base):
+    """Append-only record of every admin change, with before/after snapshots (see audit.py)."""
+    __tablename__ = "admin_audit_log"
+
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(30), nullable=False, index=True)  # partner | scheme | application
+    entity_id = Column(String(40), nullable=False, index=True)  # partner id, scheme code, application reference
+    action = Column(String(40), nullable=False)  # created | updated | capacity_changed | metrics_updated | ...
+    actor = Column(String(100), nullable=False)
+    before = Column(JSON, nullable=True)  # None for creations
+    after = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)

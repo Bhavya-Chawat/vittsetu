@@ -5,7 +5,11 @@ async function errorFrom(res) {
   let body = null;
   try {
     body = await res.json();
-    detail = typeof body.detail === 'string' ? body.detail : body.detail?.message || JSON.stringify(body);
+    if (typeof body.detail === 'string') detail = body.detail;
+    else if (Array.isArray(body.detail)) {
+      // FastAPI validation errors: [{loc: [...], msg}, ...]
+      detail = body.detail.map((e) => `${(e.loc || []).slice(1).join('.')}: ${e.msg}`).join('; ');
+    } else detail = body.detail?.message || JSON.stringify(body);
   } catch {
     // ignore
   }
@@ -24,76 +28,68 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+const json = (method, body) => ({ method, body: JSON.stringify(body) });
+
+function query(params = {}) {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+  ).toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** auth = { token, user }. The user name is percent-encoded: header values must be ASCII. */
+function adminHeaders({ token, user }) {
+  return { 'X-Admin-Token': token, ...(user ? { 'X-Admin-User': encodeURIComponent(user) } : {}) };
+}
+
+function admin(auth, path, options = {}) {
+  return request(path, { ...options, headers: { ...adminHeaders(auth), ...options.headers } });
+}
+
 export const api = {
   listSchemes: () => request('/api/schemes'),
   getScheme: (code) => request(`/api/schemes/${code}`),
-  checkEligibility: (profile) =>
-    request('/api/eligibility', { method: 'POST', body: JSON.stringify({ profile }) }),
-  recommend: (payload) =>
-    request('/api/recommend', { method: 'POST', body: JSON.stringify(payload) }),
-  calculate: (payload) =>
-    request('/api/calculate', { method: 'POST', body: JSON.stringify(payload) }),
-  partnersNearby: (payload) =>
-    request('/api/partners/nearby', { method: 'POST', body: JSON.stringify(payload) }),
+  getStats: () => request('/api/stats'),
+  checkEligibility: (profile) => request('/api/eligibility', json('POST', { profile })),
+  recommend: (payload) => request('/api/recommend', json('POST', payload)),
+  calculate: (payload) => request('/api/calculate', json('POST', payload)),
+  partnersNearby: (payload) => request('/api/partners/nearby', json('POST', payload)),
   listActivities: () => request('/api/activities'),
-  classifyActivity: (text) =>
-    request('/api/activities/classify', { method: 'POST', body: JSON.stringify({ text }) }),
-  interpret: (payload) =>
-    request('/api/interpret', { method: 'POST', body: JSON.stringify(payload) }),
-  ask: (payload) => request('/ask', { method: 'POST', body: JSON.stringify(payload) }),
-  createApplication: (payload) =>
-    request('/api/applications', { method: 'POST', body: JSON.stringify(payload) }),
+  classifyActivity: (text) => request('/api/activities/classify', json('POST', { text })),
+  interpret: (payload) => request('/api/interpret', json('POST', payload)),
+  ask: (payload) => request('/ask', json('POST', payload)),
+  createApplication: (payload) => request('/api/applications', json('POST', payload)),
   getApplication: (reference) => request(`/api/applications/${encodeURIComponent(reference.trim())}`),
 
-  // Admin
-  adminListPartners: (token) => request('/api/admin/partners', { headers: { 'X-Admin-Token': token } }),
-  adminCreatePartner: (token, payload) =>
-    request('/api/admin/partners', {
-      method: 'POST',
-      headers: { 'X-Admin-Token': token },
-      body: JSON.stringify(payload),
-    }),
-  adminUpdateCapacity: (token, partnerId, payload) =>
-    request(`/api/admin/partners/${partnerId}/capacity`, {
-      method: 'PATCH',
-      headers: { 'X-Admin-Token': token },
-      body: JSON.stringify(payload),
-    }),
-  adminUpdateMetrics: (token, partnerId, payload) =>
-    request(`/api/admin/partners/${partnerId}/metrics`, {
-      method: 'PATCH',
-      headers: { 'X-Admin-Token': token },
-      body: JSON.stringify(payload),
-    }),
-  adminDownloadMetricsTemplate: async (token) => {
-    const res = await fetch('/api/admin/partners/metrics/template.csv', { headers: { 'X-Admin-Token': token } });
+  // Admin — every call takes auth = { token, user }
+  adminListPartners: (auth, params) => admin(auth, `/api/admin/partners${query(params)}`),
+  adminCreatePartner: (auth, payload) => admin(auth, '/api/admin/partners', json('POST', payload)),
+  adminUpdatePartner: (auth, id, payload) => admin(auth, `/api/admin/partners/${id}`, json('PATCH', payload)),
+  adminUpdateCapacity: (auth, id, payload) => admin(auth, `/api/admin/partners/${id}/capacity`, json('PATCH', payload)),
+  adminUpdateMetrics: (auth, id, payload) => admin(auth, `/api/admin/partners/${id}/metrics`, json('PATCH', payload)),
+  adminGeocode: (auth, payload) => admin(auth, '/api/admin/geocode', json('POST', payload)),
+  adminDownloadMetricsTemplate: async (auth) => {
+    const res = await fetch('/api/admin/partners/metrics/template.csv', { headers: adminHeaders(auth) });
     if (!res.ok) throw await errorFrom(res);
     return res.blob();
   },
-  adminImportMetrics: async (token, file, { dryRun = false, updatedBy = 'admin' } = {}) => {
+  adminImportMetrics: async (auth, file, { dryRun = false, updatedBy = 'admin' } = {}) => {
     const form = new FormData();
     form.append('file', file);
-    const params = new URLSearchParams({ dry_run: String(dryRun), updated_by: updatedBy });
-    const res = await fetch(`/api/admin/partners/metrics/import?${params}`, {
+    const res = await fetch(`/api/admin/partners/metrics/import${query({ dry_run: dryRun, updated_by: updatedBy })}`, {
       method: 'POST',
-      headers: { 'X-Admin-Token': token }, // no Content-Type: the browser sets the multipart boundary
+      headers: adminHeaders(auth), // no Content-Type: the browser sets the multipart boundary
       body: form,
     });
     if (!res.ok) throw await errorFrom(res);
     return res.json();
   },
-  adminListApplications: (token) => request('/api/admin/applications', { headers: { 'X-Admin-Token': token } }),
-  adminUpdateApplicationStatus: (token, reference, payload) =>
-    request(`/api/admin/applications/${encodeURIComponent(reference)}/status`, {
-      method: 'PATCH',
-      headers: { 'X-Admin-Token': token },
-      body: JSON.stringify(payload),
-    }),
-  adminListSchemes: (token) => request('/api/admin/schemes', { headers: { 'X-Admin-Token': token } }),
-  adminUpdateScheme: (token, code, payload) =>
-    request(`/api/admin/schemes/${code}`, {
-      method: 'PUT',
-      headers: { 'X-Admin-Token': token },
-      body: JSON.stringify(payload),
-    }),
+  adminListApplications: (auth, params) => admin(auth, `/api/admin/applications${query(params)}`),
+  adminUpdateApplicationStatus: (auth, reference, payload) =>
+    admin(auth, `/api/admin/applications/${encodeURIComponent(reference)}/status`, json('PATCH', payload)),
+  adminListSchemes: (auth) => admin(auth, '/api/admin/schemes'),
+  adminUpdateScheme: (auth, code, payload, { dryRun = false } = {}) =>
+    admin(auth, `/api/admin/schemes/${code}${query({ dry_run: dryRun })}`, json('PUT', payload)),
+  adminAudit: (auth, params) => admin(auth, `/api/admin/audit${query(params)}`),
+  adminMetrics: (auth) => admin(auth, '/api/admin/metrics'),
 };

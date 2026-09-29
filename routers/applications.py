@@ -17,6 +17,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+import audit
 from db import get_db
 from financial_engine import max_eligible_loan
 from models import Application, ApplicationEvent, Partner, Scheme
@@ -172,9 +173,10 @@ def admin_list_applications(status: Optional[ApplicationStatus] = None, db: Sess
 
 @router.patch(
     "/api/admin/applications/{reference}/status",
-    response_model=ApplicationAdmin, dependencies=[Depends(require_admin)],
+    response_model=ApplicationAdmin,
 )
-def admin_update_application_status(reference: str, req: ApplicationStatusUpdate, db: Session = Depends(get_db)):
+def admin_update_application_status(reference: str, req: ApplicationStatusUpdate,
+                                    db: Session = Depends(get_db), actor: str = Depends(require_admin)):
     app = _get_by_reference(db, reference)
     allowed = allowed_next_statuses(app.status)
     if req.status not in allowed:
@@ -182,11 +184,15 @@ def admin_update_application_status(reference: str, req: ApplicationStatusUpdate
                   else f"Cannot move from {app.status} to {req.status}; allowed: {', '.join(allowed)}.")
         raise HTTPException(status_code=409, detail=detail)
 
+    # The signed-in admin (X-Admin-User) if given, else the name in the request body.
+    name = actor if actor != "admin" else req.updated_by.strip()
+    before = audit.snapshot(app)
     db.add(ApplicationEvent(
         application_id=app.id, event_type="status_changed", from_status=app.status, to_status=req.status,
-        note=req.note, actor=f"admin:{req.updated_by.strip()}",
+        note=req.note, actor=f"admin:{name}",
     ))
     app.status = req.status
+    audit.record(db, "application", app.reference, "status_changed", name, before, audit.snapshot(app))
     db.commit()
     db.refresh(app)
     return _admin(app)

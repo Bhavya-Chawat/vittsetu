@@ -16,14 +16,25 @@ from rag_core import build_vector_store, force_rebuild_index
 from agent import agent
 from db import init_db
 from llm_client import LLMUnavailableError
-from routers import schemes, calculate, partners, admin, interpret, applications
+from routers import schemes, calculate, partners, admin, interpret, applications, stats
 
 VOICE_SERVICE_URL = os.environ.get("VOICE_SERVICE_URL", "http://localhost:8001")
 
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
+# Browsers may call the API cross-origin only from these origins. The built
+# frontend is served same-origin by this app, so production usually needs none;
+# the defaults cover the Vite dev server and local single-server mode.
+DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
+CORS_ORIGINS = [o.strip() for o in os.environ.get("VITTSETU_CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",") if o.strip()]
+
 app = FastAPI(title="VittSetu — SC Channel Finance Navigator API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "PATCH"],
+    allow_headers=["Content-Type", "X-Admin-Token", "X-Admin-User"],
+)
 
 app.include_router(schemes.router)
 app.include_router(calculate.router)
@@ -31,6 +42,10 @@ app.include_router(partners.router)
 app.include_router(admin.router)
 app.include_router(interpret.router)
 app.include_router(applications.router)
+app.include_router(stats.router)
+
+if admin.is_production() and admin.expected_admin_token() is None:
+    print("[WARN] VITTSETU_ENV=production but ADMIN_TOKEN is unset or the default — the admin console is disabled.")
 
 
 @app.exception_handler(LLMUnavailableError)

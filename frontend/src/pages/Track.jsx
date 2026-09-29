@@ -33,7 +33,7 @@ function StatusSteps({ status }) {
 }
 
 export default function Track() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [params, setParams] = useSearchParams();
   const [reference, setReference] = useState(params.get('ref') ?? '');
   const [application, setApplication] = useState(null);
@@ -113,7 +113,7 @@ export default function Track() {
           <ul className="timeline">
             {application.timeline.map((e, i) => (
               <li key={i}>
-                <span className="muted">{formatDateTime(e.created_at)}</span> — {t(`status_${e.to_status}`)}
+                <span className="muted">{formatDateTime(e.created_at, lang)}</span> — {t(`status_${e.to_status}`)}
               </li>
             ))}
           </ul>

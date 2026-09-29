@@ -45,9 +45,19 @@ uv pip install --python .venv -r voice_service/requirements.txt   # only needed 
 Copy `.env.example` to `.env` and fill in:
 
 - `GROQ_API_KEY` — needed for the LLM features ("Ask VittSetu" chat + `/api/interpret` form-filling). The server starts without it — the recommender, calculator, partner locator and admin console all work — but those two endpoints return a clear `503` until it's set. Get one at https://console.groq.com/keys.
-- `ADMIN_TOKEN` — protects the admin console (partner capacity toggle, scheme edits). Defaults to `vittsetu-admin-dev` for local use; change it for anything beyond your own machine.
+- `ADMIN_TOKEN` — protects the admin console. Defaults to `vittsetu-admin-dev` for local use; with `VITTSETU_ENV=production` that default is refused (see **Security**).
 - `HF_TOKEN` — only needed to run `voice_service` (its models are gated on Hugging Face). See `voice_service/README.md` for the access request steps.
 - `VOICE_SERVICE_URL` — where `api.py` looks for `voice_service`. Defaults to `http://localhost:8001`; only set it if running voice_service elsewhere.
+
+Optional settings:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GROQ_MODEL` | `openai/gpt-oss-20b` | Groq model for chat and `/api/interpret` |
+| `VITTSETU_ENV` | *(unset)* | Set to `production` to refuse the default admin token |
+| `VITTSETU_CORS_ORIGINS` | Vite dev server + `localhost:8000` | Comma-separated origins allowed to call the API cross-origin. The built frontend is same-origin and needs none. |
+| `VITTSETU_DB_PATH` | `./vittsetu.db` | SQLite file location (tests point this at a temp file) |
+| `VITTSETU_ROUTING_<FIELD>` | see **Partner Routing** | Override any routing threshold, e.g. `VITTSETU_ROUTING_NPA_EXCLUDE_PCT=12` |
 
 `ffmpeg` (system package, not pip) is also required if you're running `voice_service` — it normalizes recorded audio before transcription.
 
@@ -119,15 +129,58 @@ uv pip install --python .venv -r requirements-dev.txt
 uv run pytest
 ```
 
-The suite runs against a throwaway SQLite database seeded from `scripts/seed_schemes.py`, with the Groq LLM mocked — it never touches your `vittsetu.db`, `chroma_db/`, `.env` keys or the network.
+The suite runs against a throwaway SQLite database seeded from `scripts/seed_schemes.py`, with the Groq LLM and Nominatim mocked — it never touches your `vittsetu.db`, `chroma_db/`, `.env` keys or the network. Calculator expectations are hand-verified independently of the engine (see `tests/test_financial_engine.py`).
+
+**CI** (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: `pytest` (Python 3.12, CPU-only torch), then the frontend's `npm run lint` and `npm run build`.
 
 ## Admin Console
 
-Visit `/admin`, sign in with `ADMIN_TOKEN`. From there you can:
+Visit `/admin` and sign in with `ADMIN_TOKEN` plus your name (recorded against every change). The session lasts until the tab closes. Tabs:
 
-- **Toggle a partner's capacity** (`available` / `limited` / `not_accepting`) — `not_accepting` partners are routed away immediately; `limited` ones rank below `available` ones. Every partner starts at `available` (never a fabricated status).
-- **Enter portfolio figures** (NPA %, overdue %, fund utilization %, allocated/disbursed funds, with an "as of" date) — download the CSV template, fill it in, validate, import. Imports are all-or-nothing. Single partners can also be updated via `PATCH /api/admin/partners/{id}/metrics`.
-- **Manage routed applications** — advance each through `routed → acknowledged_by_partner → handed_off_to_pmsuraj → sanctioned → disbursed`, or mark it `rejected` from any open status. Every change is recorded in an audit trail.
+- **Overview** — applications by status, median days from routed to disbursed, partners by routing status, and data gaps (partners without coordinates or district).
+- **Partners** — search, filter (type, state, routing status, missing coordinates, missing district) and page through partners; add or edit one (with a **Geocode address** button that looks up coordinates on OpenStreetMap, at most 1 request/second); toggle capacity (`available` / `limited` / `not_accepting` — `not_accepting` partners are routed away immediately). Every partner starts at `available`, never a fabricated status.
+- **Portfolio metrics** — enter NPA %, overdue %, fund utilization %, allocated/disbursed funds with an "as of" date, one partner at a time or via the CSV template (validate first; imports are all-or-nothing).
+- **Applications** — advance each through `routed → acknowledged_by_partner → handed_off_to_pmsuraj → sanctioned → disbursed`, or mark it `rejected` from any open status.
+- **Schemes** — edit limits and rates. A source URL is mandatory for every edit, and the console shows a field-by-field diff to confirm before anything changes.
+- **Audit log** — every capacity, metrics, partner, scheme and application-status change, with who, when, and before/after values.
+
+## API Reference
+
+Interactive docs are at `/docs` when the backend is running. Summary:
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET /api/schemes`, `GET /api/schemes/{code}` | — | Scheme terms, with source and last-verified date |
+| `POST /api/eligibility` | — | SC category + income ceiling check |
+| `POST /api/recommend` | — | Matched/rejected schemes, best fit, trade-offs, comparison |
+| `GET /api/activities`, `POST /api/activities/classify` | — | Activity taxonomy; deterministic classification of a description |
+| `POST /api/calculate` | — | Loan, moratorium interest, instalments, amortization schedule |
+| `POST /api/partners/nearby` | — | Routable partners (ranked) + routed-away partners with reasons |
+| `POST /api/applications` | — | Route an application to a partner (consent required) → `VS-YYYY-NNNNNN` |
+| `GET /api/applications/{reference}` | — | Public status lookup — no applicant details |
+| `GET /api/stats` | — | Scheme/partner coverage counts for the home page |
+| `POST /api/interpret` | — (needs `GROQ_API_KEY`) | Free text → draft requirement fields |
+| `POST /ask`, `POST /transcribe`, `POST /speak`, `GET /health`, `POST /reindex` | — | RAG chat, voice proxies, health, index rebuild |
+| `GET /api/admin/partners` | admin | Search / filter / paginate partners (`q`, `partner_type`, `state`, `routing_status`, `missing`, `page`, `page_size`) |
+| `POST /api/admin/partners`, `PATCH /api/admin/partners/{id}` | admin | Add / edit a partner |
+| `PATCH /api/admin/partners/{id}/capacity` | admin | Set capacity status |
+| `PATCH /api/admin/partners/{id}/metrics` | admin | Set portfolio figures |
+| `GET /api/admin/partners/metrics/template.csv`, `POST /api/admin/partners/metrics/import` | admin | Bulk figures via CSV (`dry_run` supported) |
+| `POST /api/admin/geocode` | admin | Look up coordinates for an address (Nominatim) |
+| `GET /api/admin/schemes`, `PUT /api/admin/schemes/{code}` | admin | Edit a scheme (`source_url` required; `dry_run=true` returns the diff) |
+| `GET /api/admin/applications`, `PATCH /api/admin/applications/{reference}/status` | admin | List / advance applications |
+| `GET /api/admin/audit` | admin | Audit log (`entity_type`, `entity_id`, paginated) |
+| `GET /api/admin/metrics` | admin | Operational metrics for the Overview tab |
+
+Admin endpoints need an `X-Admin-Token` header; an optional `X-Admin-User` (percent-encoded) names the actor in the audit log.
+
+## Security
+
+- The admin token is compared in constant time (`hmac.compare_digest`). With `VITTSETU_ENV=production`, the default token (or no token) disables the admin API with a `503` — set a long random `ADMIN_TOKEN`.
+- The console keeps the token in `sessionStorage` (cleared when the tab closes), never `localStorage`.
+- CORS only allows the origins in `VITTSETU_CORS_ORIGINS`, and only the methods and headers the app uses.
+- The applicant wizard's answers persist in `sessionStorage` for the tab only; **Start over** clears them. The public status lookup never returns applicant details.
+- Still a single shared admin token: for a real deployment, put the console behind proper per-user authentication.
 
 ## Partner Routing
 
@@ -181,9 +234,12 @@ python scripts/fetch_schemes.py --query "solar subsidy" --count 3
 ├── financial_engine.py          # Guideline-rule-driven loan calculator + amortization schedule
 ├── activity_taxonomy.py         # Keyword classifier over reference_data/activity_taxonomy.json
 ├── partner_engine.py            # Routing policy (NPA/overdue/utilization) + geospatial ranking
-├── routers/                     # /api/schemes, /calculate, /partners, /admin, /interpret, /applications
+├── geocoding.py                 # Shared, rate-limited Nominatim client (ingest + admin console)
+├── audit.py                     # Before/after snapshots for the admin audit log
+├── routers/                     # /api/schemes, /calculate, /partners, /admin, /interpret, /applications, /stats
 ├── frontend/                    # React (Vite) app — the applicant wizard, map, admin console, Ask VittSetu
-│   └── src/pages/                Home, Eligibility, Requirement, Results, Calculator, Partners, Checklist, Track, AskVittSetu, Admin
+│   ├── src/pages/                Home, Eligibility, Requirement, Results, Calculator, Partners, Checklist, Track, AskVittSetu, Admin
+│   └── src/components/admin/     Admin console tabs (overview, partners, metrics, applications, schemes, audit)
 ├── data/nsfdc_schemes/           # NSFDC-specific long-form docs for the RAG chatbot
 ├── scripts/
 │   ├── seed_schemes.py           # Seeds the 5 verified NSFDC schemes into vittsetu.db
@@ -194,6 +250,7 @@ python scripts/fetch_schemes.py --query "solar subsidy" --count 3
 │   ├── add_scheme.py             # Manually add a RAG document
 │   └── build_index.py            # Force-rebuild the ChromaDB index
 ├── tests/                        # pytest suite (temp DB, mocked LLM — no network, no API key)
+├── .github/workflows/ci.yml      # pytest + frontend lint/build on push and PR
 └── voice_service/                # Separate FastAPI microservice: ASR + TTS
 ```
 

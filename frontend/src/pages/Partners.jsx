@@ -198,6 +198,7 @@ export default function Partners() {
                 key={p.id}
                 role="radio"
                 aria-checked={selected}
+                aria-label={`${p.name}, ${p.partner_type}, ${t(`routing_${p.routing_status}`)}`}
                 tabIndex={0}
                 className={`partner-option${selected ? ' selected' : ''}`}
                 onClick={() => choose(p)}

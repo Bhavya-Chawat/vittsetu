@@ -31,7 +31,6 @@ results until an admin adds coordinates.
 import argparse
 import re
 import sys
-import time
 from datetime import date
 from pathlib import Path
 
@@ -40,12 +39,10 @@ import pymupdf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import geocoding
 from db import SessionLocal, init_db
 from models import Partner
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-NOMINATIM_HEADERS = {"User-Agent": "VittSetu-Hackathon-Prototype/1.0 (contact: project maintainer)"}
-GEOCODE_DELAY_SECONDS = 1.1  # respect Nominatim's 1 req/sec usage policy
 
 SOURCE_PAGE = "http://nsfdc.nic.in/our-channel-partners"
 
@@ -252,20 +249,13 @@ PARSERS = {
 
 
 def geocode(query: str) -> tuple[float, float] | None:
+    """Shared Nominatim client (geocoding.py) — it enforces the 1 req/sec limit."""
     try:
-        resp = requests.get(
-            NOMINATIM_URL,
-            params={"q": f"{query}, India", "format": "json", "limit": 1},
-            headers=NOMINATIM_HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        results = resp.json()
-        if results:
-            return float(results[0]["lat"]), float(results[0]["lon"])
-    except Exception as e:
+        result = geocoding.geocode(query)
+    except geocoding.GeocodingError as e:
         print(f"    [geocode-fail] {query[:60]}: {e}")
-    return None
+        return None
+    return (result.lat, result.lon) if result else None
 
 
 def ingest(only: str | None = None):
@@ -300,13 +290,10 @@ def ingest(only: str | None = None):
                     # Address-only geocodes far more reliably than "org name, address" —
                     # Nominatim matches physical locations, not organization names.
                     coords = geocode(entry["address"])
-                    time.sleep(GEOCODE_DELAY_SECONDS)
                     if not coords and entry["state"]:
                         coords = geocode(f"{entry['address']}, {entry['state']}")
-                        time.sleep(GEOCODE_DELAY_SECONDS)
                 if not coords and entry["state"]:
                     coords = geocode(entry["state"])
-                    time.sleep(GEOCODE_DELAY_SECONDS)
 
                 partner = Partner(
                     name=entry["name"],

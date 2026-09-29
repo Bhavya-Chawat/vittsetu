@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { LanguageProvider } from './context/LanguageContext';
 import { AppStateProvider } from './context/AppStateContext';
@@ -10,8 +11,10 @@ import Calculator from './pages/Calculator';
 import Partners from './pages/Partners';
 import Checklist from './pages/Checklist';
 import AskVittSetu from './pages/AskVittSetu';
-import Admin from './pages/Admin';
 import Track from './pages/Track';
+
+// Admin-only code isn't needed by applicants — load it on demand.
+const Admin = lazy(() => import('./pages/Admin'));
 
 export default function App() {
   return (
@@ -29,7 +32,7 @@ export default function App() {
               <Route path="/checklist" element={<Checklist />} />
               <Route path="/ask" element={<AskVittSetu />} />
               <Route path="/track" element={<Track />} />
-              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin" element={<Suspense fallback={<p>…</p>}><Admin /></Suspense>} />
             </Routes>
           </Layout>
         </BrowserRouter>
